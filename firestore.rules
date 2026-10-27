@@ -1,0 +1,199 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // AUTHENTICATION HELPERS
+    // ============================================
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verifiedUser() {
+      return signedIn()
+        && request.auth.token.email_verified == true;
+    }
+
+    function isNexusAdmin() {
+      return verifiedUser()
+        && request.auth.token.get("admin", false) == true
+        && request.auth.token.get("nexusRole", "") == "nexus_admin";
+    }
+
+    function isOwner(userId) {
+      return signedIn()
+        && request.auth.uid == userId;
+    }
+
+    function validRole(role) {
+      return role in ["employee", "vendor", "client"];
+    }
+
+    function hasUserProfile() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        );
+    }
+
+    function currentUserProfile() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data;
+    }
+
+    function approvedClientForOrganization(orgId) {
+      return verifiedUser()
+        && hasUserProfile()
+        && currentUserProfile().role == "client"
+        && currentUserProfile().status == "approved"
+        && currentUserProfile().organizationId == orgId;
+    }
+
+    function approvedMemberForOrganization(orgId) {
+      return verifiedUser()
+        && hasUserProfile()
+        && currentUserProfile().status == "approved"
+        && currentUserProfile().organizationId == orgId;
+    }
+
+    // ============================================
+    // USER PROFILES
+    // ============================================
+
+    match /users/{userId} {
+
+      // Users can read only their own profile.
+      // Nexus Admin can read all profiles.
+      allow get: if isOwner(userId)
+        || isNexusAdmin();
+
+      allow list: if isNexusAdmin();
+
+      // New registrations must start as pending.
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasAll([
+          "uid",
+          "email",
+          "role",
+          "status",
+          "details",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "email",
+          "role",
+          "status",
+          "details",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.email
+          == request.auth.token.email
+        && validRole(request.resource.data.role)
+        && request.resource.data.status == "pending"
+        && request.resource.data.details is map
+        && request.resource.data.details.email
+          == request.auth.token.email
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // Only trusted backend functions can update profiles.
+      allow update, delete: if false;
+    }
+
+    // ============================================
+    // ORGANIZATIONS
+    // ============================================
+
+    match /organizations/{organizationId} {
+
+      // Admins can access every organization.
+      // Approved members can read only their own.
+      allow get: if isNexusAdmin()
+        || approvedMemberForOrganization(organizationId);
+
+      // Prevent clients from listing other organizations.
+      allow list: if isNexusAdmin();
+
+      // Creation and approval are backend-controlled.
+      allow create, update, delete: if false;
+    }
+
+    // ============================================
+    // APPROVAL AUDIT
+    // ============================================
+
+    match /approvalAudit/{auditId} {
+
+      allow get, list: if isNexusAdmin();
+
+      allow create, update, delete: if false;
+    }
+
+    // ============================================
+    // SERVICE REQUESTS
+    // ============================================
+
+    match /serviceRequests/{requestId} {
+
+      // Nexus Admin can read all requests.
+      // Approved clients can read requests belonging
+      // to their own organization only.
+      allow get, list: if isNexusAdmin()
+        || (
+          verifiedUser()
+          && resource.data.organizationId is string
+          && approvedClientForOrganization(
+            resource.data.organizationId
+          )
+        );
+
+      // Service requests are created and updated
+      // through trusted Cloud Functions only.
+      allow create, update, delete: if false;
+    }
+
+    // ============================================
+    // DEFAULT DENY
+    // ============================================
+
+
+    // Equipment: approved clients can read their organisation's records.
+    match /equipment/{equipmentId} {
+      allow get, list: if isNexusAdmin()
+        || (
+          verifiedUser()
+          && resource.data.organizationId is string
+          && approvedClientForOrganization(
+            resource.data.organizationId
+          )
+        );
+
+      allow create, update, delete: if false;
+    }
+
+    // Maintenance: approved clients can read their organisation's records.
+    match /maintenance/{maintenanceId} {
+      allow get, list: if isNexusAdmin()
+        || (
+          verifiedUser()
+          && resource.data.organizationId is string
+          && approvedClientForOrganization(
+            resource.data.organizationId
+          )
+        );
+
+      allow create, update, delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

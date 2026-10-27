@@ -41,3 +41,51 @@ example
 # generated native folders
 /ios
 /android
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+serviceAccountKey.json
+**/serviceAccountKey.json
+**/*.secret.local
+functions/.env*
+functions/.secret.local
+
+# Dependencies and generated files
+node_modules/
+**/node_modules/
+.expo/
+dist/
+web-build/
+functions/lib/
+*.log
+
+# Firebase emulator databases and backups
+emulator-data/
+emulator-data-backup/
+firebase-export-*/
+firebase-recovery-safe-copy/
+firebase-saved-data/
+firebase-backup-*/
+auth_export/
+firestore_export/
+firebase-export-metadata.json
+
+# Local backup files
+*.backup
+*.backup.*
+*.bak
+*.backup.txt
+
+# Local AI tooling
+.agents/
+.claude/
+
+# Additional local source backups
+*.before-*.txt
+*.name-backup.txt
+
+# Additional local source backups
+*.before-*.txt
+*.name-backup.txt

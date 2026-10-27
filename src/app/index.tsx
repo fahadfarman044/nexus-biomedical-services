@@ -1,98 +1,113 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Redirect } from "expo-router";
+import { useEffect, useState } from "react";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
+import { onAuthStateChanged, User } from "firebase/auth";
+
+import { doc, getDoc } from "firebase/firestore";
+
+import { auth, db } from "../config/firebase";
+
+type NexusRoute =
+  | "/(auth)/login"
+  | "/(dashboard)/admin"
+  | "/(dashboard)/employee"
+  | "/(dashboard)/vendor"
+  | "/(dashboard)/client";
+
+export default function Index() {
+  const [loading, setLoading] = useState(true);
+  const [destination, setDestination] = useState<NexusRoute>("/(auth)/login");
+
+  useEffect(() => {
+    let active = true;
+
+    const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+      let nextRoute: NexusRoute = "/(auth)/login";
+
+      try {
+        if (user) {
+          await user.reload();
+
+          if (user.emailVerified) {
+            const token = await user.getIdTokenResult(true);
+
+            const isAdmin =
+              token.claims.admin === true &&
+              token.claims.nexusRole === "nexus_admin";
+
+            if (isAdmin) {
+              nextRoute = "/(dashboard)/admin";
+            } else {
+              const snapshot = await getDoc(doc(db, "users", user.uid));
+
+              if (snapshot.exists()) {
+                const profile = snapshot.data();
+
+                if (profile.status === "approved") {
+                  switch (profile.role) {
+                    case "employee":
+                      nextRoute = "/(dashboard)/employee";
+                      break;
+
+                    case "vendor":
+                      nextRoute = "/(dashboard)/vendor";
+                      break;
+
+                    case "client":
+                      nextRoute = "/(dashboard)/client";
+                      break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Nexus startup authentication error:", error);
+      } finally {
+        if (active) {
+          setDestination(nextRoute);
+          setLoading(false);
+        }
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  if (loading) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#3B00CC" />
+
+        <Text style={styles.loadingText}>
+          Loading Nexus Biomedical Services...
+        </Text>
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
-  );
+  return <Redirect href={destination} />;
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8F7FC",
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+
+  loadingText: {
+    marginTop: 16,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1A0061",
+    textAlign: "center",
   },
 });
